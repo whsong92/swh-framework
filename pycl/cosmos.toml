@@ -1,0 +1,17 @@
+[runtime]
+arena_capacity = 1024
+log_level = "info"
+
+# L1 Fast Working Memory (Redis)
+[storage.redis]
+url = "redis://redis:6379"
+connection_timeout_ms = 2000
+
+# L2 Cognitive Topology Graph (SurrealDB)
+[storage.surrealdb]
+endpoint = "surrealdb:8000"
+user = "root"
+pass = "root"
+namespace = "swhai"
+database = "cognition"
+connection_timeout_ms = 3000
