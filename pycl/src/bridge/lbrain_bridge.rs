@@ -1,16 +1,17 @@
+// pycl/src/bridge/lbrain_bridge.rs
 use anyhow::{Context, Result};
 use jni::objects::{JByteBuffer, JString, JValue};
 use jni::{InitArgsBuilder, JNIVersion, JavaVM};
 use std::sync::Arc;
 use tracing::info;
 
+#[derive(Clone)]
 pub struct LbrainBridge {
     jvm: Option<Arc<JavaVM>>,
 }
 
 impl LbrainBridge {
     pub fn init() -> Result<Self> {
-        // OS 환경변수 CLASSPATH 확인 및 .classpath 파일 보조
         let cp_from_file = std::fs::read_to_string("lbrain/.classpath")
             .or_else(|_| std::fs::read_to_string("../lbrain/.classpath"))
             .unwrap_or_default();
@@ -59,7 +60,6 @@ impl LbrainBridge {
         let jvm = self.jvm.as_ref().context("JVM not initialized")?;
         let mut env = jvm.attach_current_thread()?;
 
-        // 스레드 ContextClassLoader를 SystemClassLoader로 설정하여 Clojure 동적 로더 연결 보장
         let system_class_loader = env.call_static_method(
             "java/lang/ClassLoader",
             "getSystemClassLoader",
@@ -81,9 +81,9 @@ impl LbrainBridge {
             &[JValue::from(&system_class_loader)],
         )?;
 
-        // lbrain.core & lbrain.memory 로드
         let core_ns = env.new_string("lbrain.core")?;
         let mem_ns = env.new_string("lbrain.memory")?;
+        let bp_ns = env.new_string("lbrain.buddha-proxy")?;
         let clojure_core = env.new_string("clojure.core")?;
         let require_fn = env.new_string("require")?;
 
@@ -108,6 +108,13 @@ impl LbrainBridge {
             &[JValue::from(&mem_ns)],
         )?.l()?;
 
+        let bp_sym = env.call_static_method(
+            "clojure/lang/RT",
+            "readString",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::from(&bp_ns)],
+        )?.l()?;
+
         env.call_method(
             &req_var,
             "invoke",
@@ -122,7 +129,49 @@ impl LbrainBridge {
             &[JValue::from(&mem_sym)],
         )?;
 
-        info!("[YAHWEH/Clojure] Runtime namespaces required (lbrain.core, lbrain.memory).");
+        env.call_method(
+            &req_var,
+            "invoke",
+            "(Ljava/lang/Object;)Ljava/lang/Object;",
+            &[JValue::from(&bp_sym)],
+        )?;
+
+        // ---------------------------------------------------------------------
+        // Host C-ABI Function Pointer 직접 주입 (swh_call_buddha, swh_string_free)
+        // ---------------------------------------------------------------------
+        let bind_fn = env.new_string("bind-host-symbols!")?;
+        let bind_var = env.call_static_method(
+            "clojure/lang/RT",
+            "var",
+            "(Ljava/lang/String;Ljava/lang/String;)Lclojure/lang/Var;",
+            &[JValue::from(&bp_ns), JValue::from(&bind_fn)],
+        )?.l()?;
+
+        let call_ptr = crate::swh_call_buddha as *const () as usize as i64;
+        let free_ptr = crate::swh_string_free as *const () as usize as i64;
+
+        let call_obj = env.call_static_method(
+            "java/lang/Long",
+            "valueOf",
+            "(J)Ljava/lang/Long;",
+            &[JValue::from(call_ptr)],
+        )?.l()?;
+
+        let free_obj = env.call_static_method(
+            "java/lang/Long",
+            "valueOf",
+            "(J)Ljava/lang/Long;",
+            &[JValue::from(free_ptr)],
+        )?.l()?;
+
+        env.call_method(
+            &bind_var,
+            "invoke",
+            "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+            &[JValue::from(&call_obj), JValue::from(&free_obj)],
+        )?;
+
+        info!("[YAHWEH/Clojure] Runtime namespaces required and host C-ABI symbols injected.");
         Ok(())
     }
 
@@ -154,7 +203,8 @@ impl LbrainBridge {
         Ok(())
     }
 
-    pub fn dispatch(&self, opcode: &str, payload_json: &str) -> Result<String> {
+    /// [Sync] JNI 블로킹 동기 디스패치
+    pub fn dispatch_sync(&self, opcode: &str, payload_json: &str) -> Result<String> {
         let jvm = self.jvm.as_ref().context("JVM not initialized")?;
         let mut env = jvm.attach_current_thread()?;
 
@@ -183,7 +233,25 @@ impl LbrainBridge {
         Ok(res_str)
     }
 
+    /// [Async] Tokio spawn_blocking 기반 비동기 디스패치
+    pub async fn dispatch_async(&self, opcode: &str, payload_json: &str) -> Result<String> {
+        let clone_self = self.clone();
+        let op = opcode.to_string();
+        let payload = payload_json.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            clone_self.dispatch_sync(&op, &payload)
+        })
+        .await
+        .context("Clojure async task panicked")?
+    }
+
+    #[inline]
+    pub fn dispatch(&self, opcode: &str, payload_json: &str) -> Result<String> {
+        self.dispatch_sync(opcode, payload_json)
+    }
+
     pub fn ping(&self) -> Result<String> {
-        self.dispatch("status", "{}")
+        self.dispatch_sync("status", "{}")
     }
 }

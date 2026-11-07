@@ -1,28 +1,13 @@
-// pycl/src/swhai/router.rs
 use crate::bridge::lbrain_bridge::LbrainBridge;
 use crate::bridge::rbrain_bridge::RbrainBridge;
 use crate::cosmos::storage::StorageHub;
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::info;
-
-/// 변증법적 합의 판정 결과 (Neural + Symbolic)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DialecticVerdict {
-    pub agreed: bool,
-    pub primitive: String,
-    pub neural_confidence: f32,
-    pub symbolic_passed: bool,
-    pub reason: String,
-}
 
 pub struct BrainRouter {
     rbrain: Arc<RwLock<RbrainBridge>>,
     lbrain: Arc<RwLock<LbrainBridge>>,
-    #[allow(dead_code)]
     storage: StorageHub,
 }
 
@@ -39,78 +24,77 @@ impl BrainRouter {
         }
     }
 
-    /// 인과/스킬 합의 처리: Python과 Clojure의 dispatch 결과를 동기화
-    pub async fn dispatch_dialectic(
-        &self,
-        opcode: &str,
-        payload_json: &str,
-    ) -> Result<DialecticVerdict> {
-        // 1. BUDDHA (Python) 비동기 디스패치
-        let neural_res = {
-            let r = self.rbrain.read().await;
-            r.dispatch(opcode, payload_json).await.ok()
-        };
+    // =========================================================================
+    // 1. BUDDHA (Python) Sync / Async Dispatch
+    // =========================================================================
 
-        // 2. YAHWEH (Clojure) 디스패치
-        let symbolic_res = {
-            let l = self.lbrain.read().await;
-            l.dispatch(opcode, payload_json).ok()
-        };
-
-        let agreed = neural_res.is_some() && symbolic_res.is_some();
-        let reason = if agreed {
-            format!("Dialectic synthesis reached for opcode '{}'", opcode)
-        } else {
-            format!("Partial or disagreed evaluation for opcode '{}'", opcode)
-        };
-
-        info!(
-            "[ROUTER] Opcode '{}' -> Agreed: {}, Neural: {}, Symbolic: {}",
-            opcode,
-            agreed,
-            neural_res.is_some(),
-            symbolic_res.is_some()
-        );
-
-        Ok(DialecticVerdict {
-            agreed,
-            primitive: opcode.to_string(),
-            neural_confidence: if neural_res.is_some() { 1.0 } else { 0.0 },
-            symbolic_passed: symbolic_res.is_some(),
-            reason,
-        })
-    }
-
-    /// 동적 스킬 라우팅
-    pub async fn execute_dynamic_skill(&self, skill_name: &str, arg: f64) -> Result<String> {
-        let payload = json!({
-            "skill_name": skill_name,
-            "arg": arg
-        }).to_string();
-
+    pub async fn dispatch_buddha_async(&self, opcode: &str, payload_json: &str) -> Result<String> {
         let r = self.rbrain.read().await;
-        r.dispatch("dynamic_call", &payload).await
+        r.dispatch_async(opcode, payload_json).await
     }
 
-    /// 동적 스킬 마운트 (Hot-Patching)
-    pub async fn mount_skill(&self, skill_name: &str, code: &str) -> Result<String> {
-        let payload = json!({
-            "skill_name": skill_name,
-            "code": code
-        }).to_string();
-
-        let r = self.rbrain.read().await;
-        r.dispatch("mount_skill", &payload).await
+    pub fn dispatch_buddha_sync(&self, opcode: &str, payload_json: &str) -> Result<String> {
+        let r = self.rbrain.blocking_read();
+        r.dispatch_sync(opcode, payload_json)
     }
 
-    /// 인과 추론 단계 실행
-    pub async fn execute_causal_step(&self, state: serde_json::Value, action: serde_json::Value) -> Result<String> {
-        let payload = json!({
-            "state": state,
-            "action": action
-        }).to_string();
+    #[inline]
+    pub async fn dispatch_buddha(&self, opcode: &str, payload_json: &str) -> Result<String> {
+        self.dispatch_buddha_async(opcode, payload_json).await
+    }
 
+    // =========================================================================
+    // 2. YAHWEH (Clojure) Sync / Async Dispatch
+    // =========================================================================
+
+    pub async fn dispatch_yahweh_async(&self, opcode: &str, payload_json: &str) -> Result<String> {
         let l = self.lbrain.read().await;
-        l.dispatch("causal_step", &payload)
+        l.dispatch_async(opcode, payload_json).await
+    }
+
+    pub fn dispatch_yahweh_sync(&self, opcode: &str, payload_json: &str) -> Result<String> {
+        let l = self.lbrain.blocking_read();
+        l.dispatch_sync(opcode, payload_json)
+    }
+
+    #[inline]
+    pub async fn dispatch_yahweh(&self, opcode: &str, payload_json: &str) -> Result<String> {
+        self.dispatch_yahweh_async(opcode, payload_json).await
+    }
+
+    // =========================================================================
+    // 3. 브로드캐스트 & 핑퐁
+    // =========================================================================
+
+    pub async fn broadcast(&self, opcode: &str, payload_json: &str) -> (Result<String>, Result<String>) {
+        let b = self.dispatch_buddha_async(opcode, payload_json).await;
+        let y = self.dispatch_yahweh_async(opcode, payload_json).await;
+        (b, y)
+    }
+
+    pub async fn ping_all(&self) -> (Result<String>, Result<String>) {
+        let b = self.dispatch_buddha_async("status", "{}").await;
+        let y = self.dispatch_yahweh_async("status", "{}").await;
+        (b, y)
+    }
+
+    // =========================================================================
+    // 4. 스토리지 단일 게이트웨이
+    // =========================================================================
+
+    pub async fn storage_set(&self, key: &str, value_json: &str, ttl_sec: Option<u64>) -> Result<()> {
+        self.storage.cache_state(key, value_json, ttl_sec).await
+    }
+
+    pub async fn storage_get(&self, key: &str) -> Result<Option<String>> {
+        self.storage.load_state(key).await
+    }
+
+    pub async fn storage_del(&self, key: &str) -> Result<bool> {
+        self.storage.redis.del(key).await
+    }
+
+    pub async fn storage_surreal_query(&self, sql: &str) -> Result<String> {
+        self.storage.query_surreal(sql).await
     }
 }

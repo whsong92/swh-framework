@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. COSMOS Core 커널 부트스트랩 (cosmos.toml 설정 로드)
+    // 1. COSMOS Core 커널 부트스트랩
     let cosmos = CosmosCore::bootstrap("cosmos.toml").await?;
 
     // 2. L0 3-Way Zero-Copy 파이프라인 검증 (단일 read_tensor 프로토콜)
@@ -26,11 +26,12 @@ async fn main() -> Result<()> {
         let mut line = String::new();
 
         println!("\n=======================================================");
-        println!("  swhAI Unified Cognitive REPL (dev)");
+        println!("  swhAI Unified Kernel REPL (dev)");
         println!("  Commands:");
-        println!("    status                     - Check BUDDHA/YAHWEH status");
-        println!("    dialectic <opcode> <json>  - Run dialectic consensus");
-        println!("    skill <name> <arg>         - Call dynamic skill");
+        println!("    status                     - Check BUDDHA & YAHWEH status");
+        println!("    buddha <opcode> [json]     - Direct dispatch to BUDDHA");
+        println!("    yahweh <opcode> [json]     - Direct dispatch to YAHWEH");
+        println!("    broadcast <opcode> [json]  - Broadcast to both engines");
         println!("    quit / exit                - Shutdown");
         println!("=======================================================\n");
 
@@ -59,22 +60,15 @@ async fn main() -> Result<()> {
 
                 "status" => {
                     rt.block_on(async {
-                        let r_stat = {
-                            let r = cosmos_task.rbrain.read().await;
-                            r.ping().await.unwrap_or_else(|e| format!("Err: {:?}", e))
-                        };
-                        let l_stat = {
-                            let l = cosmos_task.lbrain.read().await;
-                            l.ping().unwrap_or_else(|e| format!("Err: {:?}", e))
-                        };
-                        println!("==> BUDDHA (Python)  : {}", r_stat);
-                        println!("==> YAHWEH (Clojure) : {}", l_stat);
+                        let (r_stat, l_stat) = cosmos_task.router.ping_all().await;
+                        println!("==> BUDDHA (Python)  : {}", r_stat.unwrap_or_else(|e| format!("Err: {:?}", e)));
+                        println!("==> YAHWEH (Clojure) : {}", l_stat.unwrap_or_else(|e| format!("Err: {:?}", e)));
                     });
                 }
 
-                "dialectic" => {
+                "buddha" => {
                     if parts.len() < 2 {
-                        warn!("사용법: dialectic <opcode> [json_payload]");
+                        warn!("Usage: buddha <opcode> [json_payload]");
                         continue;
                     }
                     let opcode = parts[1];
@@ -85,37 +79,57 @@ async fn main() -> Result<()> {
                     };
 
                     rt.block_on(async {
-                        match cosmos_task.router.dispatch_dialectic(opcode, &payload).await {
-                            Ok(verdict) => {
-                                println!(
-                                    "==> 변증법적 판정: {}",
-                                    if verdict.agreed { "합의 도달 (AGREED)" } else { "합의 기각 (REJECTED)" }
-                                );
-                                println!("    세부: {}", verdict.reason);
-                            }
-                            Err(e) => error!("[swhAI] Dialectic error: {:?}", e),
+                        match cosmos_task.router.dispatch_buddha(opcode, &payload).await {
+                            Ok(res) => println!("==> BUDDHA Result: {}", res),
+                            Err(e) => error!("[swhAI] BUDDHA error: {:?}", e),
                         }
                     });
                 }
 
-                "skill" => {
-                    if parts.len() < 3 {
-                        warn!("사용법: skill <skill_name> <number_arg>");
+                "yahweh" => {
+                    if parts.len() < 2 {
+                        warn!("Usage: yahweh <opcode> [json_payload]");
                         continue;
                     }
-                    let skill_name = parts[1];
-                    let arg: f64 = parts[2].parse().unwrap_or(0.0);
+                    let opcode = parts[1];
+                    let payload = if parts.len() >= 3 {
+                        parts[2..].join(" ")
+                    } else {
+                        "{}".to_string()
+                    };
 
                     rt.block_on(async {
-                        match cosmos_task.router.execute_dynamic_skill(skill_name, arg).await {
-                            Ok(res) => println!("==> Skill Result: {}", res),
-                            Err(e) => error!("[swhAI] Skill error: {:?}", e),
+                        match cosmos_task.router.dispatch_yahweh_async(opcode, &payload).await {
+                            Ok(res) => println!("==> YAHWEH Result: {}", res),
+                            Err(e) => error!("[swhAI] YAHWEH error: {:?}", e),
                         }
+                    });
+                }
+
+                "broadcast" => {
+                    if parts.len() < 2 {
+                        warn!("Usage: broadcast <opcode> [json_payload]");
+                        continue;
+                    }
+                    let opcode = parts[1];
+                    let payload = if parts.len() >= 3 {
+                        parts[2..].join(" ")
+                    } else {
+                        "{}".to_string()
+                    };
+
+                    rt.block_on(async {
+                        let (b_res, y_res) = cosmos_task.router.broadcast(opcode, &payload).await;
+                        println!("==> BUDDHA    : {}", b_res.unwrap_or_else(|e| format!("Err: {:?}", e)));
+                        println!("==> YAHWEH    : {}", y_res.unwrap_or_else(|e| format!("Err: {:?}", e)));
                     });
                 }
 
                 other => {
-                    info!("[swhAI] Unrecognized command: \"{}\". Type 'status', 'dialectic', or 'skill'.", other);
+                    info!(
+                        "[swhAI] Unrecognized command: \"{}\". Type 'status', 'buddha', 'yahweh', 'broadcast', or 'quit'.",
+                        other
+                    );
                 }
             }
         }
@@ -123,7 +137,6 @@ async fn main() -> Result<()> {
     })
     .await??;
 
-    // 4. 정상 종료 루틴
     cosmos_repl.shutdown().await?;
     info!("[COSMOS/Rust] VM terminated cleanly.");
     Ok(())

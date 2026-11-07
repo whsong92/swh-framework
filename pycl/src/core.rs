@@ -89,6 +89,9 @@ impl CosmosCore {
             storage.clone(),
         ));
 
+        // C-ABI Reverse Dispatch용 전역 바인딩 등록 (A 방식)
+        crate::set_global_router(Arc::clone(&router));
+
         CentralLogger::log(
             Subsystem::Cosmos,
             LogLevel::Info,

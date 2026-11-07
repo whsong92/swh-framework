@@ -8,6 +8,6 @@ pub mod yahweh;
 pub use buddha::Buddha;
 pub use module::BrainTarget;
 pub use registry::{FunctionMeta, FunctionRegistry, RuntimeTarget};
-pub use router::{BrainRouter, DialecticVerdict};
+pub use router::BrainRouter;
 pub use value::BrainValue;
 pub use yahweh::Yahweh;

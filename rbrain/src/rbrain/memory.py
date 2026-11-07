@@ -1,3 +1,4 @@
+# rbrain/src/rbrain/memory.py
 """
 swhAI BUDDHA L0 Shared Memory Arena (NumPy/PyTorch) 제로카피 브로커.
 - Rust(COSMOS/pycl)가 독점 소유하는 물리 메모리 버퍼(*mut f32)를 인-플레이스로 사영.
@@ -6,7 +7,7 @@ swhAI BUDDHA L0 Shared Memory Arena (NumPy/PyTorch) 제로카피 브로커.
 - Universal Primitives 연산을 위한 안전한 슬라이스 분할 및 I/O 제어 제공.
 """
 
-from typing import Optional, Tuple
+from typing import Optional
 import ctypes
 import numpy as np
 import torch
@@ -65,7 +66,6 @@ def set_shared_arena(arr: np.ndarray) -> None:
     if arr.dtype != np.float32:
         raise ValueError(f"[BUDDHA/Python Error] Expected float32 array, got {arr.dtype}")
 
-    # Python이 메모리를 소유하고 있다면 즉시 경고 및 플래그 강제
     if arr.flags.owndata:
         print("[BUDDHA/Python Warning] NumPy array owns data! Clearing OWNDATA flag for safety.")
         arr.flags.writeable = True
@@ -95,7 +95,6 @@ def bind_raw_memory(raw_ptr_address: int, capacity: int) -> int:
     c_float_p = ctypes.POINTER(ctypes.c_float)
     address = ctypes.cast(raw_ptr_address, c_float_p)
 
-    # Rust 메모리 직접 뷰 생성 (OWNDATA는 자동으로 False가 됨)
     np_arr = np.ctypeslib.as_array(address, shape=(capacity,))
     assert not np_arr.flags.owndata, "Mapped array must not own data"
 
@@ -122,7 +121,6 @@ def read_tensor_slice(offset: int, length: int) -> torch.Tensor:
             f"[BUDDHA/Python Error] Slice [{offset}:{end}] exceeds arena capacity ({_ARENA_CAPACITY})"
         )
 
-    # torch slice는 제로카피 뷰(View)를 반환함
     return _SHARED_ARENA_TORCH[offset:end]
 
 
@@ -142,7 +140,6 @@ def write_tensor_slice(offset: int, source_tensor: torch.Tensor) -> int:
             f"[BUDDHA/Python Error] Write range [{offset}:{end}] exceeds arena capacity ({_ARENA_CAPACITY})"
         )
 
-    # In-place 복사: source가 CPU에 float32로 맞추어져 있어야 함
     if source_tensor.device.type != "cpu":
         source_tensor = source_tensor.cpu()
     if source_tensor.dtype != torch.float32:
@@ -150,4 +147,3 @@ def write_tensor_slice(offset: int, source_tensor: torch.Tensor) -> int:
 
     _SHARED_ARENA_TORCH[offset:end].copy_(source_tensor.view(-1))
     return length
-
