@@ -66,44 +66,6 @@ def ping() -> str:
         return f"BUDDHA neural runtime online (device={device}, arena_slots={get_capacity()})"
     return f"BUDDHA neural runtime online (device={device}, arena=unbound)"
 
-
-# =============================================================================
-# 2. L0 Shared Arena 제로카피 바인딩 배관
-# =============================================================================
-
-def bind_raw_arena(raw_ptr_address: int, capacity: int) -> int:
-    """
-    Rust 호스트로부터 원시 포인터 주소(0x...)와 슬롯 크기를 받아
-    NumPy(OWNDATA=False) 배열로 복사 없이 사영하고 rbrain.memory에 바인딩.
-    """
-    if raw_ptr_address == 0 or capacity <= 0:
-        raise ValueError(f"Invalid pointer (0x{raw_ptr_address:X}) or capacity ({capacity})")
-
-    # ctypes 포인터 캐스팅
-    c_float_p = ctypes.POINTER(ctypes.c_float)
-    address = ctypes.cast(raw_ptr_address, c_float_p)
-    
-    # Rust 메모리 직접 뷰 생성 (Zero-Copy)
-    np_arr = np.ctypeslib.as_array(address, shape=(capacity,))
-    set_shared_arena(np_arr)
-    return 0
-
-
-def process_shared_tensor(raw_ptr_address: int, capacity: int) -> float:
-    """
-    L0 SharedArena 메모리 주소를 PyTorch 텐서 뷰(owndata=False)로 사영하여
-    제자리(In-Place) 무복사 검증을 수행하는 진단 파이프라인.
-    """
-    bind_raw_arena(raw_ptr_address, capacity)
-    arena = get_shared_arena()
-    tensor = torch.from_numpy(arena)
-
-    # L0 제로카피 검증 징표: 108.0 기록 (Rust 및 Clojure와 핑퐁 동기화)
-    tensor[0] = 108.0
-    print(f"[BUDDHA/Python] Verification Token 108.0 written to L0 Arena[0] at 0x{raw_ptr_address:X}")
-    return 108.0
-
-
 # =============================================================================
 # 3. Universal Primitives 통합 실행 디스패처 (Rust FFI 브리지 연동)
 # =============================================================================

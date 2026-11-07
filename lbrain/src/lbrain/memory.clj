@@ -127,18 +127,3 @@
         (write-slice! offset min-vec)
         (write-slice! (+ offset dim) max-vec)
         (* 2 dim)))))
-
-;; -----------------------------------------------------------------------------
-;; 6. 무결성 검증 (Self-Test)
-;; -----------------------------------------------------------------------------
-
-(defn pingpong-test!
-  "Rust/Python과의 제로카피 메모리 공유 무결성 테스트.
-   0번 슬롯에 777.0 기록 후 반환."
-  []
-  (if (is-bound?)
-    (let [old-val (get-float 0)]
-      (println (format "[YAHWEH/Clojure] Memory PingPong -> Old Arena[0]: %.2f. Writing 777.0..." old-val))
-      (set-float! 0 777.0)
-      {:status :ok :written 777.0 :previous old-val})
-    {:status :unbound}))

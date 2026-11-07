@@ -151,22 +151,3 @@ def write_tensor_slice(offset: int, source_tensor: torch.Tensor) -> int:
     _SHARED_ARENA_TORCH[offset:end].copy_(source_tensor.view(-1))
     return length
 
-
-# =============================================================================
-# 4. 메모리 무결성 진단 (Ping-Pong Self-Test)
-# =============================================================================
-
-@torch.no_grad()
-def pingpong_check() -> Tuple[float, float]:
-    """
-    Rust 및 Clojure와의 제로카피 공유 무결성 점검.
-    0번 슬롯을 읽은 후 108.0 기록.
-    """
-    if not is_bound():
-        raise RuntimeError("[BUDDHA/Python Error] Cannot run ping-pong test on unbound arena")
-
-    old_val = float(_SHARED_ARENA_TORCH[0].item())
-    _SHARED_ARENA_TORCH[0] = 108.0
-    print(f"[BUDDHA/Python] Memory PingPong -> Old Arena[0]: {old_val:.2f}, Wrote: 108.0")
-    return old_val, 108.0
-

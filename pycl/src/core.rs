@@ -33,10 +33,13 @@ impl CosmosCore {
             "Starting Cosmos Core & swhAI bootstrap sequence...".to_string(),
         );
 
+        // [설정 주입] 전달받은 config_path(cosmos.toml)를 파싱 (실패 시 기본 fallback 사용)
+        let config = crate::cosmos::storage::CosmosConfig::load_or_default(_config_path);
+
         // 1. L0 Shared Physical Arena (4M f32 = 16MB, 64-byte SIMD 정렬)
-        let arena_slots = 4 * 1024 * 1024;
+        let arena_slots = config.memory.arena_slots.unwrap_or(4 * 1024 * 1024);
         let raw_arena = SharedArena::new(arena_slots);
-        let raw_ptr = raw_arena.as_mut_ptr(); // 혹은 arena.rs에 정의된 raw_arena.as_mut_ptr()
+        let raw_ptr = raw_arena.as_mut_ptr();
 
         // 2. 이종 런타임 FFI 브리지 기동 (CPython BUDDHA + GraalVM YAHWEH)
         let rbrain_bridge = RbrainBridge::init("../rbrain")

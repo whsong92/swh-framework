@@ -105,20 +105,6 @@ impl Buddha {
         Ok(ret)
     }
 
-    /// L0 Shared Arena 물리 메모리 주소를 PyTorch 텐서로 사영 및 무결성 핑퐁 검증
-    pub fn process_buffer(&self, raw_addr: usize, capacity: usize) -> Result<f32> {
-        let result: f32 = Python::with_gil(|py| -> PyResult<f32> {
-            let rbrain = py.import("rbrain.core")?;
-            let func = rbrain.getattr("process_shared_tensor")?;
-            let ret: f32 = func.call1((raw_addr, capacity))?.extract()?;
-            Ok(ret)
-        })
-        .context("[BUDDHA/Python] Shared tensor verification failed")?;
-
-        info!("[BUDDHA/Python] Shared buffer verified at 0x{:x} (Verification Token: {})", raw_addr, result);
-        Ok(result)
-    }
-
     /// L0 Shared Arena를 통한 6대 대수 프리미티브(+, -, *, /, ⊂, ¬) 기하학적 연산 수행
     pub fn eval_primitive(
         &self,
