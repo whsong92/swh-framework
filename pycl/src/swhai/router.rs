@@ -1,20 +1,20 @@
+// pycl/src/swhai/router.rs
 use crate::bridge::lbrain_bridge::LbrainBridge;
 use crate::bridge::rbrain_bridge::RbrainBridge;
 use crate::cosmos::storage::StorageHub;
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub struct BrainRouter {
-    rbrain: Arc<RwLock<RbrainBridge>>,
-    lbrain: Arc<RwLock<LbrainBridge>>,
+    rbrain: Arc<RbrainBridge>,
+    lbrain: Arc<LbrainBridge>,
     storage: StorageHub,
 }
 
 impl BrainRouter {
     pub fn new(
-        rbrain: Arc<RwLock<RbrainBridge>>,
-        lbrain: Arc<RwLock<LbrainBridge>>,
+        rbrain: Arc<RbrainBridge>,
+        lbrain: Arc<LbrainBridge>,
         storage: StorageHub,
     ) -> Self {
         Self {
@@ -25,17 +25,17 @@ impl BrainRouter {
     }
 
     // =========================================================================
-    // 1. BUDDHA (Python) Sync / Async Dispatch
+    // 1. BUDDHA (Python) Sync / Async Dispatch (Lock-Free)
     // =========================================================================
 
+    #[inline]
     pub async fn dispatch_buddha_async(&self, opcode: &str, payload_json: &str) -> Result<String> {
-        let r = self.rbrain.read().await;
-        r.dispatch_async(opcode, payload_json).await
+        self.rbrain.dispatch_async(opcode, payload_json).await
     }
 
+    #[inline]
     pub fn dispatch_buddha_sync(&self, opcode: &str, payload_json: &str) -> Result<String> {
-        let r = self.rbrain.blocking_read();
-        r.dispatch_sync(opcode, payload_json)
+        self.rbrain.dispatch_sync(opcode, payload_json)
     }
 
     #[inline]
@@ -44,17 +44,17 @@ impl BrainRouter {
     }
 
     // =========================================================================
-    // 2. YAHWEH (Clojure) Sync / Async Dispatch
+    // 2. YAHWEH (Clojure) Sync / Async Dispatch (Lock-Free)
     // =========================================================================
 
+    #[inline]
     pub async fn dispatch_yahweh_async(&self, opcode: &str, payload_json: &str) -> Result<String> {
-        let l = self.lbrain.read().await;
-        l.dispatch_async(opcode, payload_json).await
+        self.lbrain.dispatch_async(opcode, payload_json).await
     }
 
+    #[inline]
     pub fn dispatch_yahweh_sync(&self, opcode: &str, payload_json: &str) -> Result<String> {
-        let l = self.lbrain.blocking_read();
-        l.dispatch_sync(opcode, payload_json)
+        self.lbrain.dispatch_sync(opcode, payload_json)
     }
 
     #[inline]

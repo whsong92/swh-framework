@@ -1,3 +1,4 @@
+// pycl/src/core.rs
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -13,8 +14,8 @@ use crate::swhai::router::BrainRouter;
 /// COSMOS Host Core / pycl VM 통합 컨테이너
 pub struct CosmosCore {
     pub arena: Arc<RwLock<SharedArena>>,
-    pub rbrain: Arc<RwLock<RbrainBridge>>,
-    pub lbrain: Arc<RwLock<LbrainBridge>>,
+    pub rbrain: Arc<RbrainBridge>,
+    pub lbrain: Arc<LbrainBridge>,
     pub storage: StorageHub,
     pub router: Arc<BrainRouter>,
     pub registry: Arc<FunctionRegistry>,
@@ -67,8 +68,8 @@ impl CosmosCore {
         );
 
         let arena = Arc::new(RwLock::new(raw_arena));
-        let rbrain = Arc::new(RwLock::new(rbrain_bridge));
-        let lbrain = Arc::new(RwLock::new(lbrain_bridge));
+        let rbrain = Arc::new(rbrain_bridge);
+        let lbrain = Arc::new(lbrain_bridge);
 
         // 4. L1/L2 Unified Storage Hub (Redis + SurrealDB) 초기화
         let storage = StorageHub::connect(
@@ -89,7 +90,7 @@ impl CosmosCore {
             storage.clone(),
         ));
 
-        // C-ABI Reverse Dispatch용 전역 바인딩 등록 (A 방식)
+        // C-ABI Reverse Dispatch용 전역 바인딩 등록
         crate::set_global_router(Arc::clone(&router));
 
         CentralLogger::log(
@@ -110,14 +111,8 @@ impl CosmosCore {
 
     /// 인지 엔진 헬스체크 및 부트스트랩 핑퐁
     pub async fn init_cognitive_engines(&self) -> Result<()> {
-        let b_status = {
-            let r = self.rbrain.read().await;
-            r.ping().await?
-        };
-        let y_status = {
-            let l = self.lbrain.read().await;
-            l.ping()?
-        };
+        let b_status = self.rbrain.ping().await?;
+        let y_status = self.lbrain.ping()?;
 
         CentralLogger::log(
             Subsystem::Buddha,

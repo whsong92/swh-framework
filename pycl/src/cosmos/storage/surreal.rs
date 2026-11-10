@@ -1,3 +1,4 @@
+// swh-framework/pycl/src/cosmos/storage/surreal.rs
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -8,7 +9,9 @@ use surrealdb::engine::remote::ws::{Client, Ws};
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{error, info, warn};
+
+use crate::cosmos::logging::{CentralLogger, LogLevel, Subsystem};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConceptNode {
@@ -63,9 +66,13 @@ impl SurrealStorage {
             .trim_end_matches("/rpc")
             .trim_end_matches('/');
 
-        info!(
-            "[COSMOS/Rust] Connecting to SurrealDB at '{}' (Timeout: {:?}, NS: {}, DB: {})...",
-            clean_endpoint, timeout_dur, ns, database
+        CentralLogger::log(
+            Subsystem::Cosmos,
+            LogLevel::Info,
+            format!(
+                "Attempting connection to SurrealDB at '{}' (Timeout: {:?}, NS: '{}', DB: '{}')...",
+                clean_endpoint, timeout_dur, ns, database
+            ),
         );
 
         match tokio::time::timeout(timeout_dur, Surreal::new::<Ws>(clean_endpoint)).await {
@@ -77,16 +84,29 @@ impl SurrealStorage {
                     })
                     .await
                 {
-                    eprintln!("[COSMOS/SurrealDB] Auth failed: {}. Falling back to Mock.", e);
+                    CentralLogger::log(
+                        Subsystem::Cosmos,
+                        LogLevel::Error,
+                        format!("SurrealDB auth failed for user '{}': {:?}. Falling back to Mock.", user, e),
+                    );
                     return Self::mock();
                 }
 
                 if let Err(e) = surreal.use_ns(ns).use_db(database).await {
-                    eprintln!("[COSMOS/SurrealDB] Scope failed: {}. Falling back to Mock.", e);
+                    CentralLogger::log(
+                        Subsystem::Cosmos,
+                        LogLevel::Error,
+                        format!("SurrealDB scope failed (NS: '{}', DB: '{}'): {:?}. Falling back to Mock.", ns, database, e),
+                    );
                     return Self::mock();
                 }
 
-                info!("[COSMOS/Rust] SurrealDB 3.x Cognitive Topology connected.");
+                CentralLogger::log(
+                    Subsystem::Cosmos,
+                    LogLevel::Info,
+                    format!("SurrealDB 3.x L2 Cognitive Topology successfully connected (Live: '{}')", clean_endpoint),
+                );
+
                 Self {
                     db: Some(surreal),
                     mock_nodes: Arc::new(Mutex::new(HashMap::new())),
@@ -94,13 +114,18 @@ impl SurrealStorage {
                 }
             }
             Ok(Err(e)) => {
-                eprintln!("[COSMOS/SurrealDB] Connect error: {}. Falling back to Mock.", e);
+                CentralLogger::log(
+                    Subsystem::Cosmos,
+                    LogLevel::Error,
+                    format!("SurrealDB connection error to '{}': {:?}. Falling back to Mock.", clean_endpoint, e),
+                );
                 Self::mock()
             }
             Err(_) => {
-                eprintln!(
-                    "[COSMOS/SurrealDB] Connection timed out after {:?}. Falling back to Mock.",
-                    timeout_dur
+                CentralLogger::log(
+                    Subsystem::Cosmos,
+                    LogLevel::Error,
+                    format!("SurrealDB connection timed out after {:?}. Falling back to Mock.", timeout_dur),
                 );
                 Self::mock()
             }
@@ -108,11 +133,20 @@ impl SurrealStorage {
     }
 
     pub fn mock() -> Self {
+        CentralLogger::log(
+            Subsystem::Cosmos,
+            LogLevel::Warn,
+            "SurrealDB In-Memory Mock initialized (Topology not persisted to disk).".to_string(),
+        );
         Self {
             db: None,
             mock_nodes: Arc::new(Mutex::new(HashMap::new())),
             mock_edges: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    pub fn is_live(&self) -> bool {
+        self.db.is_some()
     }
 
     pub async fn save_concept(&self, node: &ConceptNode) -> Result<()> {

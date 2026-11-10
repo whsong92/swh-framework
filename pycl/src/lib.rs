@@ -1,3 +1,4 @@
+// pycl/src/lib.rs
 pub mod bridge;
 pub mod core;
 pub mod cosmos;
@@ -67,7 +68,7 @@ pub extern "C" fn swh_call_buddha(opcode: *const c_char, payload_json: *const c_
     CString::new(res).unwrap().into_raw()
 }
 
-/// L1 Redis 문자열 저장 C-ABI 게이트웨이
+/// L1 Redis 문자열 저장 C-ABI 게이트웨이 (Tokio 런타임 안전 block_in_place 적용)
 #[unsafe(no_mangle)]
 pub extern "C" fn swh_storage_set(key: *const c_char, val_json: *const c_char, ttl_sec: u64) -> i32 {
     if key.is_null() || val_json.is_null() {
@@ -79,12 +80,9 @@ pub extern "C" fn swh_storage_set(key: *const c_char, val_json: *const c_char, t
     let ttl = if ttl_sec > 0 { Some(ttl_sec) } else { None };
 
     if let Some(router) = GLOBAL_ROUTER.get() {
-        // StorageHub의 redis는 async이므로, 내부에서 최소한의 런타임 진입만 허용하거나 
-        // 전역 핸들 없이 현재 스레드가 block되지 않도록 tokio::runtime::Handle::try_current() 사용
         let res = if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.block_on(router.storage_set(&k, &v, ttl))
+            tokio::task::block_in_place(|| handle.block_on(router.storage_set(&k, &v, ttl)))
         } else {
-            // FFI 외부 스레드 호출 시 임시 런타임 또는 동기 블로킹 처리
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -97,7 +95,7 @@ pub extern "C" fn swh_storage_set(key: *const c_char, val_json: *const c_char, t
     }
 }
 
-/// L1 Redis 문자열 조회 C-ABI 게이트웨이
+/// L1 Redis 문자열 조회 C-ABI 게이트웨이 (Tokio 런타임 안전 block_in_place 적용)
 #[unsafe(no_mangle)]
 pub extern "C" fn swh_storage_get(key: *const c_char) -> *mut c_char {
     if key.is_null() {
@@ -108,7 +106,7 @@ pub extern "C" fn swh_storage_get(key: *const c_char) -> *mut c_char {
 
     if let Some(router) = GLOBAL_ROUTER.get() {
         let opt_val = if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.block_on(router.storage_get(&k)).ok().flatten()
+            tokio::task::block_in_place(|| handle.block_on(router.storage_get(&k)).ok().flatten())
         } else {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()

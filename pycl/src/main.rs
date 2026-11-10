@@ -1,21 +1,16 @@
 // pycl/src/main.rs
 use anyhow::Result;
 use pycl::core::CosmosCore;
-use pycl::cosmos::logging::{CentralLogger, LogLevel, Subsystem};
-use serde_json::json;
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. COSMOS Core 커널 부트스트랩
+    // 1. COSMOS Core 커널 부트스트랩 (순수 런타임 기동)
     let cosmos = CosmosCore::bootstrap("cosmos.toml").await?;
 
-    // 2. L0 3-Way Zero-Copy 파이프라인 검증 (단일 read_tensor 프로토콜)
-    verify_l0_pipeline(&cosmos).await?;
-
-    // 3. 인터랙티브 인지 셸 (REPL) 기동
+    // 2. 인터랙티브 인지 셸 (REPL) 기동
     let cosmos_repl = Arc::new(cosmos);
     let cosmos_task = Arc::clone(&cosmos_repl);
 
@@ -140,67 +135,4 @@ async fn main() -> Result<()> {
     cosmos_repl.shutdown().await?;
     info!("[COSMOS/Rust] VM terminated cleanly.");
     Ok(())
-}
-
-/// L0 3-Way Zero-Copy 메모리 공유 파이프라인 무결성 검증
-async fn verify_l0_pipeline(cosmos: &CosmosCore) -> Result<()> {
-    CentralLogger::log(
-        Subsystem::Cosmos,
-        LogLevel::Info,
-        "Initiating 3-Way L0 Zero-Copy Pipeline Verification...".to_string(),
-    );
-
-    // 1. Rust에서 L0 아레나 슬롯 0에 테스트 토큰(42.0) 기록
-    let raw_addr = {
-        let arena = cosmos.arena.read().await;
-        unsafe {
-            *arena.as_mut_ptr() = 42.0;
-        }
-        arena.as_mut_ptr() as usize
-    };
-
-    // 2. Python(BUDDHA)이 L0 버퍼 직접 연산 검증
-    let token = arena_read_direct(cosmos, 0).await;
-    if token == 42.0 {
-        CentralLogger::log(
-            Subsystem::Buddha,
-            LogLevel::Info,
-            format!("NumPy Zero-Copy address validated: 0x{:x}", raw_addr),
-        );
-    } else {
-        warn!("[BUDDHA/Python] Zero-Copy read mismatch at 0x{:x}", raw_addr);
-    }
-
-    // 3. Clojure(YAHWEH)가 단일 dispatch("read_tensor")를 통해 슬롯 0 값 대조
-    let clj_eval = {
-        let lbrain = cosmos.lbrain.read().await;
-        let payload = json!({ "offset": 0, "length": 1 }).to_string();
-        lbrain.dispatch("read_tensor", &payload)
-    };
-
-    match clj_eval {
-        Ok(val) => {
-            CentralLogger::log(
-                Subsystem::Yahweh,
-                LogLevel::Info,
-                format!("DirectByteBuffer Zero-Copy slot 0 verified: {}", val.trim()),
-            );
-        }
-        Err(e) => {
-            warn!("[YAHWEH/Clojure] Memory verification fallback: {:?}", e);
-        }
-    }
-
-    CentralLogger::log(
-        Subsystem::Cosmos,
-        LogLevel::Info,
-        "L0 3-Way Zero-Copy Pipeline fully synchronized.".to_string(),
-    );
-
-    Ok(())
-}
-
-async fn arena_read_direct(cosmos: &CosmosCore, idx: usize) -> f32 {
-    let arena = cosmos.arena.read().await;
-    unsafe { *arena.as_mut_ptr().add(idx) }
 }

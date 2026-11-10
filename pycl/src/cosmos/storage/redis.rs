@@ -1,3 +1,4 @@
+// swh-framework/pycl/src/cosmos/storage/redis.rs
 use anyhow::{Context, Result};
 use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
@@ -5,7 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tracing::info;
+
+use crate::cosmos::logging::{CentralLogger, LogLevel, Subsystem};
 
 pub enum RedisBackend {
     Live(Mutex<ConnectionManager>),
@@ -17,43 +19,50 @@ pub struct RedisStorage {
 }
 
 impl RedisStorage {
-    /// 타임아웃(ms)을 명시적으로 받아 연결 시도 (실패 또는 타임아웃 시 In-Memory Mock으로 폴백)
     pub async fn connect(redis_url: &str, timeout_ms: u64) -> Self {
         let timeout_dur = Duration::from_millis(timeout_ms);
-        info!(
-            "[COSMOS/Rust] Connecting to Redis at '{}' (Timeout: {:?})...",
-            redis_url, timeout_dur
+        CentralLogger::log(
+            Subsystem::Cosmos,
+            LogLevel::Info,
+            format!("Connecting to Redis at '{}' (Timeout: {:?})...", redis_url, timeout_dur),
         );
 
         match redis::Client::open(redis_url) {
             Ok(client) => {
                 match tokio::time::timeout(timeout_dur, ConnectionManager::new(client)).await {
                     Ok(Ok(manager)) => {
-                        info!("[COSMOS/Rust] Redis L1 Working Memory connected.");
+                        CentralLogger::log(
+                            Subsystem::Cosmos,
+                            LogLevel::Info,
+                            format!("Redis L1 Working Memory successfully connected ({})", redis_url),
+                        );
                         Self {
                             backend: Arc::new(RedisBackend::Live(Mutex::new(manager))),
                         }
                     }
                     Ok(Err(e)) => {
-                        eprintln!(
-                            "[COSMOS/Redis] ConnectionManager failed: {}. Falling back to In-Memory Mock.",
-                            e
+                        CentralLogger::log(
+                            Subsystem::Cosmos,
+                            LogLevel::Error,
+                            format!("Redis connection failed: {:?}. Falling back to In-Memory Mock.", e),
                         );
                         Self::mock()
                     }
                     Err(_) => {
-                        eprintln!(
-                            "[COSMOS/Redis] Connection timed out after {:?}. Falling back to In-Memory Mock.",
-                            timeout_dur
+                        CentralLogger::log(
+                            Subsystem::Cosmos,
+                            LogLevel::Error,
+                            format!("Redis connection timed out after {:?}. Falling back to In-Memory Mock.", timeout_dur),
                         );
                         Self::mock()
                     }
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "[COSMOS/Redis] Invalid URL '{}': {}. Falling back to In-Memory Mock.",
-                    redis_url, e
+                CentralLogger::log(
+                    Subsystem::Cosmos,
+                    LogLevel::Error,
+                    format!("Invalid Redis URL '{}': {:?}. Falling back to In-Memory Mock.", redis_url, e),
                 );
                 Self::mock()
             }
@@ -61,9 +70,18 @@ impl RedisStorage {
     }
 
     pub fn mock() -> Self {
+        CentralLogger::log(
+            Subsystem::Cosmos,
+            LogLevel::Warn,
+            "Redis In-Memory Mock initialized (L1 state will not persist across restarts).".to_string(),
+        );
         Self {
             backend: Arc::new(RedisBackend::Mock(Mutex::new(HashMap::new()))),
         }
+    }
+
+    pub fn is_live(&self) -> bool {
+        matches!(self.backend.as_ref(), RedisBackend::Live(_))
     }
 
     pub async fn set_str(&self, key: &str, value: &str, ttl_sec: Option<u64>) -> Result<()> {
