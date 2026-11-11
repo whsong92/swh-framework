@@ -9,7 +9,6 @@ use surrealdb::engine::remote::ws::{Client, Ws};
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
 
 use crate::cosmos::logging::{CentralLogger, LogLevel, Subsystem};
 

@@ -5,7 +5,7 @@ BUDDHA Core Runtime Infrastructure (rbrain.core)
 - L0 물리 공유 메모리 인-플레이스 바인딩
 - 동적 Python 모듈 핫패칭 및 프록시 중재
 """
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 import traceback
 import torch
 
@@ -18,11 +18,24 @@ from rbrain.memory import (
     write_tensor_slice,
 )
 import rbrain.dynamic_loader as loader
-
+from rbrain.yahweh_proxy import YahwehProxy
 
 class BuddhaCore:
-    def __init__(self):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+    _instance: Optional["BuddhaCore"] = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(BuddhaCore, cls).__new__(cls)
+            cls._instance._initialized = False 
+        return cls._instance
+    
+    def __init__(self, device: Optional[str] = None):
+        if self._initialized:
+            return
+        self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
+        self._bootstrapped: bool = False
+        self._activation_count: int = 0
+        self._initialized = True
         print(f"[BUDDHA/Python] BuddhaCore runtime initialized (Device: {self.device})")
 
     # =========================================================================
@@ -32,7 +45,8 @@ class BuddhaCore:
     def bind_arena(self, ptr_address: int, capacity: int) -> bool:
         try:
             bind_raw_memory(ptr_address, capacity)
-            return is_bound()
+            self._bootstrapped = is_bound()
+            return self._bootstrapped
         except Exception as e:
             print(f"[BUDDHA/Python Error] bind_arena failed: {e}")
             traceback.print_exc()
@@ -44,6 +58,8 @@ class BuddhaCore:
         return {
             "engine": "BUDDHA",
             "device": self.device,
+            "bootstrapped": self._bootstrapped,
+            "activation_count": self._activation_count,
             "arena": {
                 "bound": bound,
                 "raw_address": f"0x{get_raw_address():X}" if bound else None,
@@ -112,3 +128,12 @@ class BuddhaCore:
             return {"offset": offset, "written_slots": written}
 
         raise ValueError(f"[BUDDHA Error] Unsupported opcode: '{opcode}'")
+
+
+# Rust 런타임에서 모듈 로드(import) 시 즉시 인스턴스 자동 생성
+buddha_instance: BuddhaCore = BuddhaCore()
+
+
+def dispatch(opcode: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Rust PyO3에서 진입하는 최상위 모듈 디스패치 진입점"""
+    return buddha_instance.dispatch(opcode, payload)

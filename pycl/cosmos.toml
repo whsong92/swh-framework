@@ -12,6 +12,11 @@ connection_timeout_ms = 2000
 endpoint = "surrealdb:8000"
 user = "root"
 pass = "root"
-namespace = "swhai"
-database = "cognition"
+namespace = "cosmos"
+database = "topology"
 connection_timeout_ms = 3000
+
+[storage.mongo]
+uri = "mongodb://root:root@mongodb:27017"
+db_name = "swhai_meta"
+connection_timeout_ms = 2000

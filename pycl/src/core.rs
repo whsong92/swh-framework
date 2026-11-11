@@ -16,6 +16,7 @@ pub struct CosmosCore {
     pub arena: Arc<RwLock<SharedArena>>,
     pub rbrain: Arc<RbrainBridge>,
     pub lbrain: Arc<LbrainBridge>,
+    // 1급 인지 엔티티 인스턴스 직접 소유
     pub storage: StorageHub,
     pub router: Arc<BrainRouter>,
     pub registry: Arc<FunctionRegistry>,
@@ -23,7 +24,7 @@ pub struct CosmosCore {
 
 impl CosmosCore {
     /// 가상 머신 및 인지 하이브리드 엔진 전체 부트스트랩 시퀀스
-    pub async fn bootstrap(_config_path: &str) -> Result<Self> {
+    pub async fn bootstrap(config_path: &str) -> Result<Self> {
         // 0. 하드웨어 크래시 가드 및 센트럴 로거 최우선 기동
         init_crash_guard().context("[COSMOS/Rust] Failed to install hardware crash guard")?;
         CentralLogger::init();
@@ -35,7 +36,7 @@ impl CosmosCore {
         );
 
         // [설정 주입] 전달받은 config_path(cosmos.toml)를 파싱 (실패 시 기본 fallback 사용)
-        let config = crate::cosmos::storage::CosmosConfig::load_or_default(_config_path);
+        let config = crate::cosmos::storage::CosmosConfig::load_or_default(config_path);
 
         // 1. L0 Shared Physical Arena (4M f32 = 16MB, 64-byte SIMD 정렬)
         let arena_slots = config.memory.arena_slots.unwrap_or(4 * 1024 * 1024);
@@ -70,17 +71,10 @@ impl CosmosCore {
         let arena = Arc::new(RwLock::new(raw_arena));
         let rbrain = Arc::new(rbrain_bridge);
         let lbrain = Arc::new(lbrain_bridge);
+       
 
         // 4. L1/L2 Unified Storage Hub (Redis + SurrealDB) 초기화
-        let storage = StorageHub::connect(
-            "redis://redis:6379",
-            "surrealdb:8000",
-            "cosmos",
-            "topology",
-            "root",
-            "root",
-        )
-        .await;
+        let storage = StorageHub::connect_from_config(&config.storage).await;
 
         // 5. 인지 엔진: 동적 함수 레지스트리 및 변증법적 합의 라우터 마운트
         let registry = FunctionRegistry::new(Some(storage.clone()));
@@ -111,8 +105,8 @@ impl CosmosCore {
 
     /// 인지 엔진 헬스체크 및 부트스트랩 핑퐁
     pub async fn init_cognitive_engines(&self) -> Result<()> {
-        let b_status = self.rbrain.ping().await?;
-        let y_status = self.lbrain.ping()?;
+        let b_status = self.router.buddha_status().await?;
+        let y_status = self.router.yahweh_status().await?;
 
         CentralLogger::log(
             Subsystem::Buddha,

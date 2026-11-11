@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
                     };
 
                     rt.block_on(async {
-                        match cosmos_task.router.dispatch_buddha(opcode, &payload).await {
+                        match cosmos_task.router.buddha(opcode, &payload).await {
                             Ok(res) => println!("==> BUDDHA Result: {}", res),
                             Err(e) => error!("[swhAI] BUDDHA error: {:?}", e),
                         }
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
                     };
 
                     rt.block_on(async {
-                        match cosmos_task.router.dispatch_yahweh_async(opcode, &payload).await {
+                        match cosmos_task.router.yahweh(opcode, &payload).await {
                             Ok(res) => println!("==> YAHWEH Result: {}", res),
                             Err(e) => error!("[swhAI] YAHWEH error: {:?}", e),
                         }

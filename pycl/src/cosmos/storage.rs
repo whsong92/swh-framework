@@ -5,9 +5,11 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 
+pub mod mongo;
 pub mod redis;
 pub mod surreal;
 
+pub use mongo::MongoStorage;
 pub use redis::RedisStorage;
 pub use surreal::{ConceptNode, ConceptRecord, SurrealStorage, TopologyEdge, TopologyRecord};
 
@@ -37,6 +39,7 @@ pub struct MemoryConfig {
 pub struct StorageConfig {
     pub redis: RedisConfig,
     pub surrealdb: SurrealConfig,
+    pub mongo: MongoConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -52,6 +55,13 @@ pub struct SurrealConfig {
     pub pass: String,
     pub namespace: String,
     pub database: String,
+    pub connection_timeout_ms: u64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct MongoConfig {
+    pub uri: String,
+    pub db_name: String,
     pub connection_timeout_ms: u64,
 }
 
@@ -86,6 +96,11 @@ impl CosmosConfig {
                     database: "cognition".to_string(),
                     connection_timeout_ms: 3000,
                 },
+                mongo: MongoConfig {
+                    uri: "mongodb://root:root@mongodb:27017".to_string(),
+                    db_name: "swhai_meta".to_string(),
+                    connection_timeout_ms: 2000,
+                },
             },
         }
     }
@@ -96,6 +111,7 @@ impl CosmosConfig {
 pub struct StorageHub {
     pub redis: Arc<RedisStorage>,
     pub surreal: Arc<SurrealStorage>,
+    pub mongo: Option<Arc<MongoStorage>>,
 }
 
 impl StorageHub {
@@ -107,6 +123,7 @@ impl StorageHub {
         surreal_db: &str,
         surreal_user: &str,
         surreal_pass: &str,
+        mongo_uri: Option<&str>,
     ) -> Self {
         info!("[COSMOS/Storage] Initializing Unified Storage Hub (Default Timeouts: 2000ms / 3000ms)...");
 
@@ -123,7 +140,19 @@ impl StorageHub {
             .await,
         );
 
-        Self { redis, surreal }
+        let mongo = if let Some(uri) = mongo_uri {
+            match MongoStorage::connect(uri, "swhai_meta", 2000).await {
+                Ok(m) => Some(Arc::new(m)),
+                Err(e) => {
+                    eprintln!("[COSMOS/Mongo] Connection failed: {:?}. Continuing without L3.", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        Self { redis, surreal, mongo }
     }
 
     /// cosmos.toml의 전체 StorageConfig를 받아 타임아웃까지 완전 반영하는 진입점
@@ -146,7 +175,15 @@ impl StorageHub {
             .await,
         );
 
-        Self { redis, surreal }
+        let mongo = match MongoStorage::connect(&cfg.mongo.uri, &cfg.mongo.db_name, cfg.mongo.connection_timeout_ms).await {
+            Ok(m) => Some(Arc::new(m)),
+            Err(e) => {
+                eprintln!("[COSMOS/Mongo] Config-based connection failed: {:?}. Running without L3.", e);
+                None
+            }
+        };
+
+        Self { redis, surreal, mongo }
     }
 
     pub fn mock() -> Self {
@@ -154,6 +191,7 @@ impl StorageHub {
         Self {
             redis: Arc::new(RedisStorage::mock()),
             surreal: Arc::new(SurrealStorage::mock()),
+            mongo: None,
         }
     }
 

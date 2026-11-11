@@ -16,6 +16,11 @@ impl Yahweh {
         self.bridge.dispatch(opcode, payload_json)
     }
 
+    #[inline]
+    pub fn dispatch_sync(&self, opcode: &str, payload_json: &str) -> Result<String> {
+        self.bridge.dispatch_sync(opcode, payload_json)
+    }
+
     pub async fn get_status(&self) -> Result<String> {
         self.dispatch("status", "{}").await
     }
