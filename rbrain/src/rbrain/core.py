@@ -18,6 +18,7 @@ from rbrain.memory import (
     write_tensor_slice,
 )
 import rbrain.dynamic_loader as loader
+from rbrain.buddha.ego import BuddhaEgo
 from rbrain.yahweh_proxy import YahwehProxy
 
 class BuddhaCore:
@@ -35,6 +36,8 @@ class BuddhaCore:
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         self._bootstrapped: bool = False
         self._activation_count: int = 0
+
+        self.ego = BuddhaEgo()
         self._initialized = True
         print(f"[BUDDHA/Python] BuddhaCore runtime initialized (Device: {self.device})")
 

@@ -3,6 +3,7 @@
   (:require [lbrain.memory :as mem]
             [lbrain.dynamic-loader :as dyn]
             [lbrain.buddha-proxy :as bp]
+            [lbrain.yahweh.ego :as ego]
             [clojure.data.json :as json]))
 
 (defprotocol IYahwehEngine
@@ -10,7 +11,7 @@
   (bind-arena [this byte-buffer])
   (dispatch-op [this opcode payload]))
 
-(defrecord YahwehInstance [engine-name backend-type state-atom]
+(defrecord YahwehCore [engine-name backend-type state-atom ego-instance]
   IYahwehEngine
   (get-status [_]
     (let [bound? (mem/is-bound?)
@@ -20,6 +21,7 @@
        :backend backend-type
        :bootstrapped (:bootstrapped state)
        :axiom_count (count (:axioms state))
+       :ticktok (ego/get-ticktok ego-instance)
        :arena {:bound bound?
                :slots (mem/get-capacity-slots)
                :capacity_bytes (mem/get-capacity-bytes)}
@@ -51,20 +53,20 @@
 
       {:error (str "[YAHWEH Engine Error] Unsupported opcode: " opcode)})))
 
-(defn- make-yahweh-instance []
-  (let [backend (if (System/getProperty "java.vm.name") "graalvm-dev" "native-c-abi")]
-    (->YahwehInstance
-     "YAHWEH"
-     backend
-     (atom {:bootstrapped false
-            :call-count 0
-            :axioms #{[:axiom :identity :self-consistent]}}))))
+(defn- make-yahweh-core []
+  (let [backend (if (System/getProperty "java.vm.name") "graalvm-dev" "native-c-abi")
+        state (atom {:bootstrapped false
+                     :call-count 0
+                     :axioms #{[:axiom :identity :self-consistent]}})
+        ;;ego-inst ego/ego-instance]
+        ego-inst nil]
+    (->YahwehCore "YAHWEH" backend state ego-inst)))
 
-;; Rust에서 require 되자마자 즉시 인스턴스 자동 생성 및 상시 활성화
+;; Rust에서 require 되자마자 즉시 YahwehCore 생성 및 YahwehEgo 루프 가동
 (defonce yahweh-runtime
-  (let [inst (make-yahweh-instance)]
-    (println "[YAHWEH/Clojure] YahwehInstance auto-created and activated on module load.")
-    inst))
+  (let [core (make-yahweh-core)]
+    (println "[YAHWEH/Clojure] YahwehCore created and activated on module load.")
+    core))
 
 (defn bind-shared-arena
   [^java.nio.ByteBuffer byte-buffer]
